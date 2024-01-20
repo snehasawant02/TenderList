@@ -1,0 +1,95 @@
+import re
+from selenium import webdriver
+from selenium.webdriver import ActionChains
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions
+from selenium.webdriver.support.wait import WebDriverWait
+def spider(page_number: int):
+    # setup: web driver > wait object > url format > page number
+    driver = webdriver.Chrome('D:\\automation-env\\web-drivers\\chromedriver.exe')
+    wait = WebDriverWait(driver, 15)
+    url_format =\
+        "https://www.amazon.com/Converse-Chuck-Taylor-Star-Core/dp/B07KLM7JRL/" \
+        "ref=sr_1_1?" \
+        "dchild=1&" \
+        "keywords=converse&" \
+        "qid=1596469913&" \
+        "sr=8-1&" \
+        "th={page_number}"
+    try:
+        # navigate
+        driver.get(url_format.format(page_number=page_number))
+        driver.maximize_window()
+        # search your product
+        __search(driver_wait=wait, search_for='converse')
+        # cache item
+        rate_locator = (By.XPATH, "//i[contains(@class,'a-star-small-')]")
+        items = wait.until(expected_conditions.visibility_of_all_elements_located(rate_locator))
+        # product cycle
+        reviews = []
+        for i in range(len(items)):
+            reviews.append(__product_cycle(on_driver=driver, on_element=items[i], on_element_index=i + 1))
+        # output
+        print(reviews)
+    except Exception as e:
+        print(e)
+    finally:
+        if driver is not None:
+            driver.quit()
+# execute search product
+def __search(driver_wait: WebDriverWait, search_for: str):
+    # search
+    search = driver_wait.until(expected_conditions.element_to_be_clickable((By.ID, 'twotabsearchtextbox')))
+    search.clear()
+    search.send_keys(search_for)
+    search.submit()
+# execute an extraction on single item in the products list
+# you can add more logic to extract the rest of the review
+def __product_cycle(on_driver, on_element, on_element_index):
+    # hover the review element
+    ActionChains(driver=on_driver).move_to_element(on_element).perform()
+    # open reviews in new page (the index is here to handle amazon keeping in the DOM all reviews already inspected)
+    wait = WebDriverWait(on_driver, 15)
+    link_element_locator = (By.XPATH, "(//a[.='See all customer reviews'])[" + f'{on_element_index}' + "]")
+    link_element =\
+        wait.until(expected_conditions.element_to_be_clickable(link_element_locator))
+    link = link_element.get_attribute(name='href')
+    on_driver.execute_script(script="window.open('about:blank', '_blank');")
+    on_driver.switch_to_window(on_driver.window_handles[1])
+    on_driver.get(link)
+    # cache review elements
+    review_locator = (By.XPATH, "//div[contains(@id,'customer_review-')]")
+    review_elements = wait.until(expected_conditions.visibility_of_all_elements_located(review_locator))
+    # extract reviews for page
+    # if you want to iterate pages put this inside page iteration loop
+    reviews = {
+        "product": on_driver.title,
+        "link": on_driver.current_url,
+        "data": []
+    }
+    reviews_data = []
+    for e in review_elements:
+        reviews["data"].append(__get_item_review(on_driver, e))
+    # return to point 0
+    on_driver.close()
+    on_driver.switch_to_window(on_driver.window_handles[0])
+    # results
+    return reviews
+# extracts a single item reviews collection
+def __get_item_review(on_driver, on_element) -> dict:
+    # locators
+    author_locator = ".//span[@class='a-profile-name']"
+    date_locator = ".//span[@data-hook='review-date']"
+    score_locator = ".//a[.//i[@data-hook='review-star-rating']]"
+    review_locator = ".//div[@data-hook='review-collapsed']/span"
+    # data
+    review_data = {
+        'author': on_element.find_element_by_xpath(author_locator).text.strip(),
+        'date': re.findall('(?<=on ).*', on_element.find_element_by_xpath(date_locator).text.strip())[0],
+        'score': re.findall('\\d+.\\d+', on_element.find_element_by_xpath(score_locator).get_attribute("title"))[0],
+        'review': on_element.find_element_by_xpath(review_locator).text.strip(),
+    }
+    # TODO: add more logic to get also the hidden reviews for this item.
+    # results data
+    return review_data
+spider(page_number=1)
